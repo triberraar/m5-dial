@@ -490,26 +490,24 @@ lvgl:
               pad_all: 0
               bg_opa: 0
               border_width: 0
-              layout:
-                type: flex
-                flex_flow: ROW
-                flex_align_main: CENTER
-                flex_align_cross: CENTER
               widgets:
-                # Room/Outside Temperature
+                # Room/Outside Temperature (centered)
                 - label:
                     id: room_temp_label
-                    flex_grow: 1
+                    width: 140
                     text: "--.-° / --.-°"
                     text_font: temp_font_small
                     recolor: true
                     text_align: CENTER
+                    align: CENTER
 
-                # Weather Icon
+                # Weather Icon (right side)
                 - label:
                     id: weather_icon_label
                     text: "☀️"
                     text_font: icon_font_small
                     text_align: CENTER
                     text_color: 0xFFFFFF
+                    align: RIGHT_MID
+                    x: -5
                     
