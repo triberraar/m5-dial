@@ -28,13 +28,44 @@ esphome:
           lv_obj_set_style_shadow_width(id(btn_kid_bedroom), 0, LV_PART_MAIN);
 
           // 4. Display Initial Temp for Living Room
-          char buf[10];
-          if (id(ha_temp_living).has_state()) {
-            sprintf(buf, "%.1f°", id(ha_temp_living).state);
-          } else if (id(last_temp_living) > 0.1) {
-            sprintf(buf, "%.1f°", id(last_temp_living));
+          char buf[100];
+          char outside_color[8];
+          float o_temp = id(ha_outside_temp).state;
+
+          // 5-Stage Color Scale Logic
+          if (!id(ha_outside_temp).has_state()) {
+            strcpy(outside_color, "888888"); // Unknown
+          } else if (o_temp < 10.0) {
+            strcpy(outside_color, "3399FF"); // Very Cold
+          } else if (o_temp >= 10.0 && o_temp < 15.0) {
+            strcpy(outside_color, "5AC8FA"); // Cold
+          } else if (o_temp >= 15.0 && o_temp <= 23.0) {
+            strcpy(outside_color, "EEEEEE"); // OK
+          } else if (o_temp > 23.0 && o_temp <= 26.0) {
+            strcpy(outside_color, "FF9900"); // Hot
           } else {
-            sprintf(buf, "--.-°");
+            strcpy(outside_color, "FF4500"); // Very Hot (>26)
+          }
+          
+          float temp = 0;
+          if (id(ha_temp_living).has_state()) {
+            temp = id(ha_temp_living).state;
+          } else if (id(last_temp_living) > 0.1) {
+            temp = id(last_temp_living);
+          }
+
+          if (id(ha_outside_temp).has_state()) {
+            if (temp > 0.1) {
+              sprintf(buf, "#FFFFFF %.1f°# #666666 /# #%s %.1f°#", temp, outside_color, o_temp);
+            } else {
+              sprintf(buf, "#FFFFFF --.-°# #666666 /# #%s %.1f°#", outside_color, o_temp);
+            }
+          } else {
+            if (temp > 0.1) {
+              sprintf(buf, "#FFFFFF %.1f°# #666666 /# #888888 --°#", temp);
+            } else {
+              sprintf(buf, "#FFFFFF --.-°# #666666 /# #888888 --°#");
+            }
           }
           lv_label_set_text(id(room_temp_label), buf);
           ESP_LOGD("main", "UI Initialized: Living Room (ID: 1) selected");
@@ -213,10 +244,6 @@ font:
     size: 24
     glyphs: '0123456789.°- /' 
   - file: "fonts/materialdesignicons-webfont.ttf"
-    size: 26
-    id: icon_font_weather
-    glyphs: ["\U000F067F", "\U000F0599", "\U000F0590"]
-  - file: "fonts/materialdesignicons-webfont.ttf"
     id: icon_font
     size: 34
     glyphs: ["\U000F0FD3", "\U000F106E", "\U000F0209", "\U000F04B2", "\U000F01B4"]
@@ -234,7 +261,6 @@ script:
           char buf[100];
           char outside_color[8];
           float o_temp = id(ha_outside_temp).state;
-          std::string cond = id(ha_weather_condition).state;
 
           // 5-Stage Color Scale Logic
           if (!id(ha_outside_temp).has_state()) {
@@ -257,28 +283,6 @@ script:
             sprintf(buf, "#FFFFFF %.1f°# #666666 /# #%s %.1f°#", temp, outside_color, o_temp);
           } else {
             sprintf(buf, "#FFFFFF %.1f°# #666666 /# #888888 --°#", temp);
-          }
-
-          // 3. Update Icon Label (Precipitation & Storm Grouping)
-          if (cond == "rainy" || cond == "pouring" || cond == "hail" || 
-              cond == "snowy" || cond == "snowy-rainy" || 
-              cond == "lightning" || cond == "lightning-rainy") {
-            
-            // Icon color matches the outside temperature color
-            sprintf(buf, "#%s \U000F067F#", outside_color);
-            lv_label_set_text(id(weather_icon_label), buf);
-            
-          } else if (cond == "sunny" || cond == "clear-night") {
-            sprintf(buf, "#%s \U000F0599#", outside_color);
-            lv_label_set_text(id(weather_icon_label), buf);
-            
-          } else if (cond == "cloudy" || cond == "partlycloudy") {
-            sprintf(buf, "#%s \U000F0590#", outside_color);
-            lv_label_set_text(id(weather_icon_label), buf);
-            
-          } else {
-            // No icon for unmapped conditions
-            lv_label_set_text(id(weather_icon_label), "");
           }
 
           lv_label_set_text(id(room_temp_label), buf);
@@ -395,10 +399,9 @@ lvgl:
               widgets:
                 - label: {text: "\U000F106E", align: CENTER, text_font: icon_font}
 
-    # MIDDLE: TEMPERATURE DISPLAY
     - obj:
         width: 240
-        height: 120
+        height: 100
         align: CENTER
         y: -5
         bg_opa: 0
@@ -409,35 +412,24 @@ lvgl:
           flex_flow: COLUMN      # Stack Main Temp over the Room/Outside Row
           flex_align_main: CENTER
           flex_align_cross: CENTER
+          pad_row: 0
         widgets:
           # 1. Main Target Temperature
           - label:
               id: main_temp_label
+              width: 100%
               text: "21.0°"
               text_font: temp_font
               text_color: 0xFFFFFF
+              text_align: CENTER
 
           # 2. Horizontal Row for Room/Outside/Icon
-          - obj:
-              width: 220
-              height: 40
-              bg_opa: 0
-              border_width: 0
-              layout:
-                type: flex
-                flex_flow: ROW
-                flex_align_main: CENTER
-                flex_align_cross: CENTER
-              widgets:
-                - label:
-                    id: room_temp_label
-                    text: "--.-° / --.-°"
-                    text_font: temp_font_small
-                    recolor: true  # Correct key for LVGL in ESPHome
-                - label:
-                    id: weather_icon_label
-                    text: "" 
-                    text_font: icon_font_weather
-                    recolor: true
-                    pad_left: 5      # Spacing between text and icon
+          - label:
+              id: room_temp_label
+              width: 100%
+              y: -10
+              text: "--.-° / --.-°"
+              text_font: temp_font_small
+              recolor: true  # Correct key for LVGL in ESPHome
+              text_align: CENTER
                     
