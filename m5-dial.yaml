@@ -1,0 +1,443 @@
+substitutions:
+  name: m5-dial
+  friendly_name: M5 Dial Controller
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: screen_timeout_timer
+      - lambda: |-
+          // 1. Set the Source of Truth
+          id(selected_room) = 1;
+
+          auto grey = lv_color_hex(0x444444);
+          auto blue = lv_color_hex(0x00BFFF);
+          
+          // 2. Set Living Room to Blue + Glow
+          lv_obj_set_style_border_color(id(btn_living), blue, LV_PART_MAIN);
+          lv_obj_set_style_shadow_width(id(btn_living), 15, LV_PART_MAIN);
+          lv_obj_set_style_shadow_color(id(btn_living), blue, LV_PART_MAIN);
+          
+          // 3. Ensure others are Grey (No Glow)
+          lv_obj_set_style_border_color(id(btn_master_bedroom), grey, LV_PART_MAIN);
+          lv_obj_set_style_shadow_width(id(btn_master_bedroom), 0, LV_PART_MAIN);
+          lv_obj_set_style_border_color(id(btn_kid_bedroom), grey, LV_PART_MAIN);
+          lv_obj_set_style_shadow_width(id(btn_kid_bedroom), 0, LV_PART_MAIN);
+
+          // 4. Display Initial Temp for Living Room
+          char buf[10];
+          if (id(ha_temp_living).has_state()) {
+            sprintf(buf, "%.1f°", id(ha_temp_living).state);
+          } else if (id(last_temp_living) > 0.1) {
+            sprintf(buf, "%.1f°", id(last_temp_living));
+          } else {
+            sprintf(buf, "--.-°");
+          }
+          lv_label_set_text(id(room_temp_label), buf);
+          ESP_LOGD("main", "UI Initialized: Living Room (ID: 1) selected");
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+
+# --- NETWORK & SYSTEM ---
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "M5Dial-Fallback"
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  platform: esphome
+
+logger:
+
+# --- HARDWARE PERIPHERALS ---
+i2c:
+  - id: internal_i2c
+    sda: GPIO11
+    scl: GPIO12
+    scan: true
+
+spi:
+  id: spi_bus
+  mosi_pin: GPIO5
+  clk_pin: GPIO6
+
+output:
+  - platform: ledc
+    pin: GPIO9
+    id: backlight_pwm
+  - platform: ledc
+    pin: GPIO3
+    id: buzzer_out
+
+light:
+  - platform: monochromatic
+    id: display_backlight
+    output: backlight_pwm
+    default_transition_length: 500ms
+    restore_mode: ALWAYS_ON
+
+rtttl:
+  output: buzzer_out
+  id: my_buzzer
+
+# --- STATE STORAGE ---
+globals:
+  - id: target_temp
+    type: float
+    initial_value: '21.0'
+  - id: last_temp_living
+    type: float
+    initial_value: '0.0'
+  - id: last_temp_bedroom
+    type: float
+    initial_value: '0.0'
+  - id: last_temp_kid
+    type: float
+    initial_value: '0.0'
+  - id: selected_room
+    type: int
+    initial_value: '1'
+  - id: screen_is_on
+    type: bool
+    initial_value: 'true'
+
+sensor:
+  - platform: homeassistant
+    id: ha_temp_bedroom
+    entity_id: sensor.temperature_bedroom_temperature
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            id(last_temp_bedroom) = x;
+            if (id(selected_room) == 2) id(refresh_room_ui).execute(x);
+
+  - platform: homeassistant
+    id: ha_temp_living
+    entity_id: sensor.temperature_living_temperature
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            id(last_temp_living) = x;
+            if (id(selected_room) == 1) id(refresh_room_ui).execute(x);
+
+  - platform: homeassistant
+    id: ha_temp_kid
+    entity_id: sensor.temperature_office_temperature
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            id(last_temp_kid) = x;
+            if (id(selected_room) == 3) id(refresh_room_ui).execute(x);
+
+  - platform: homeassistant
+    id: ha_outside_temp
+    entity_id: weather.forecast_home  # Change to your weather entity
+    attribute: temperature
+    internal: true
+    on_value:
+      then:
+        - lambda: 'id(refresh_room_ui).execute(id(selected_room) == 1 ? id(last_temp_living) : (id(selected_room) == 2 ? id(last_temp_bedroom) : id(last_temp_kid)));'
+
+  - platform: rotary_encoder
+    id: dial_encoder
+    pin_a: GPIO40
+    pin_b: GPIO41
+    on_value:
+      then:
+        - lambda: |-
+            id(target_temp) += x > 0 ? 0.5 : -0.5;
+            char buf[10];
+            sprintf(buf, "%.1f°", id(target_temp));
+            lv_label_set_text(id(main_temp_label), buf);
+
+text_sensor:
+  - platform: homeassistant
+    id: ha_weather_condition
+    entity_id: weather.forecast_home
+    internal: true
+
+# --- NATIVE DISPLAY DRIVER ---
+display:
+  - platform: ili9xxx
+    model: gc9a01A
+    id: my_lcd
+    spi_id: spi_bus
+    cs_pin: GPIO7
+    dc_pin: GPIO4
+    reset_pin: GPIO8
+    invert_colors: true
+    dimensions:
+      width: 240
+      height: 240
+
+touchscreen:
+  - platform: ft5x06
+    id: dial_touch
+    i2c_id: internal_i2c
+    address: 0x38
+    on_touch: 
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(screen_is_on);'
+            then:
+              - light.turn_on: display_backlight
+              - delay: 500ms
+              - globals.set: {id: screen_is_on, value: 'true'}
+              - script.execute: screen_timeout_timer
+            else:
+              - script.execute: screen_timeout_timer
+
+# --- UI STATE & FONTS ---
+font:
+  - file: "gfonts://Roboto"
+    id: temp_font
+    size: 48
+    glyphs: '0123456789.°- /'
+  - file: "gfonts://Roboto"
+    id: temp_font_small
+    size: 24
+    glyphs: '0123456789.°- /' 
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    size: 26
+    id: icon_font_weather
+    glyphs: ["\U000F067F", "\U000F0599", "\U000F0590"]
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: icon_font
+    size: 34
+    glyphs: ["\U000F0FD3", "\U000F106E", "\U000F0209", "\U000F04B2", "\U000F01B4"]
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: icon_font_small
+    size: 28
+    glyphs: ["\U000F0502", "\U000F0238", "\U000F0717"]
+
+script:
+  - id: refresh_room_ui
+    parameters:
+      temp: float
+    then:
+      - lambda: |-
+          char buf[100];
+          char outside_color[8];
+          float o_temp = id(ha_outside_temp).state;
+          std::string cond = id(ha_weather_condition).state;
+
+          // 5-Stage Color Scale Logic
+          if (!id(ha_outside_temp).has_state()) {
+            strcpy(outside_color, "888888"); // Unknown
+          } else if (o_temp < 10.0) {
+            strcpy(outside_color, "3399FF"); // Very Cold
+          } else if (o_temp >= 10.0 && o_temp < 15.0) {
+            strcpy(outside_color, "5AC8FA"); // Cold
+          } else if (o_temp >= 15.0 && o_temp <= 23.0) {
+            strcpy(outside_color, "EEEEEE"); // OK
+          } else if (o_temp > 23.0 && o_temp <= 26.0) {
+            strcpy(outside_color, "FF9900"); // Hot
+          } else {
+            strcpy(outside_color, "FF4500"); // Very Hot (>26)
+          }
+
+          // 2. Format the combined string with color tags
+          // Indoor (White) / Outside (Dynamic)
+          if (id(ha_outside_temp).has_state()) {
+            sprintf(buf, "#FFFFFF %.1f°# #666666 /# #%s %.1f°#", temp, outside_color, o_temp);
+          } else {
+            sprintf(buf, "#FFFFFF %.1f°# #666666 /# #888888 --°#", temp);
+          }
+
+          // 3. Update Icon Label (Precipitation & Storm Grouping)
+          if (cond == "rainy" || cond == "pouring" || cond == "hail" || 
+              cond == "snowy" || cond == "snowy-rainy" || 
+              cond == "lightning" || cond == "lightning-rainy") {
+            
+            // Icon color matches the outside temperature color
+            sprintf(buf, "#%s \U000F067F#", outside_color);
+            lv_label_set_text(id(weather_icon_label), buf);
+            
+          } else if (cond == "sunny" || cond == "clear-night") {
+            sprintf(buf, "#%s \U000F0599#", outside_color);
+            lv_label_set_text(id(weather_icon_label), buf);
+            
+          } else if (cond == "cloudy" || cond == "partlycloudy") {
+            sprintf(buf, "#%s \U000F0590#", outside_color);
+            lv_label_set_text(id(weather_icon_label), buf);
+            
+          } else {
+            // No icon for unmapped conditions
+            lv_label_set_text(id(weather_icon_label), "");
+          }
+
+          lv_label_set_text(id(room_temp_label), buf);
+  - id: screen_timeout_timer
+    mode: restart # Crucial: Restarting the script resets the 30s timer
+    then:
+      - delay: 30s
+      - light.turn_off: display_backlight
+      - delay: 100ms
+      - globals.set:
+          id: screen_is_on
+          value: 'false'
+
+# --- UI LOGIC (LVGL) ---
+lvgl:
+  displays:
+    - my_lcd
+  touchscreens:
+    - dial_touch
+  bg_color: 0x000000
+  widgets:
+    - obj:
+        width: 240
+        height: 100
+        align: TOP_MID
+        y: 5
+        bg_opa: 0
+        border_width: 0
+        scrollbar_mode: "OFF"
+        widgets:
+          # --- MIDDLE BUTTON (Master Bedroom) ---
+          - button: &room_btn
+              id: btn_master_bedroom
+              width: 50
+              height: 48
+              align: TOP_MID
+              y: -13
+              bg_opa: 0
+              border_width: 2
+              border_color: 0x444444
+              radius: 12
+              on_click:
+                then:
+                  - lambda: |-
+                      if (!id(screen_is_on)) {
+                        return; 
+                      }
+                      id(selected_room) = 2;
+                      auto grey = lv_color_hex(0x444444);
+                      auto blue = lv_color_hex(0x00BFFF);
+                      lv_obj_set_style_border_color(id(btn_master_bedroom), blue, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_width(id(btn_master_bedroom), 15, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_color(id(btn_master_bedroom), blue, LV_PART_MAIN);
+                      lv_obj_set_style_border_color(id(btn_living), grey, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_width(id(btn_living), 0, LV_PART_MAIN);
+                      lv_obj_set_style_border_color(id(btn_kid_bedroom), grey, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_width(id(btn_kid_bedroom), 0, LV_PART_MAIN);
+                      float val = id(ha_temp_bedroom).has_state() ? id(ha_temp_bedroom).state : id(last_temp_bedroom);
+                      id(refresh_room_ui).execute(val);
+              widgets:
+                - label: {text: "\U000F0FD3", align: CENTER, text_font: icon_font}
+
+          # --- LEFT BUTTON (Living) ---
+          - button:
+              <<: *room_btn
+              id: btn_living
+              x: -56
+              y: 12
+              on_click:
+                then:
+                  - lambda: |-
+                      if (!id(screen_is_on)) {
+                        return; 
+                      }
+                      id(selected_room) = 1;
+                      auto grey = lv_color_hex(0x444444);
+                      auto blue = lv_color_hex(0x00BFFF);
+                      lv_obj_set_style_border_color(id(btn_living), blue, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_width(id(btn_living), 15, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_color(id(btn_living), blue, LV_PART_MAIN);
+                      lv_obj_set_style_border_color(id(btn_master_bedroom), grey, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_width(id(btn_master_bedroom), 0, LV_PART_MAIN);
+                      lv_obj_set_style_border_color(id(btn_kid_bedroom), grey, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_width(id(btn_kid_bedroom), 0, LV_PART_MAIN);
+                      float val = id(ha_temp_living).has_state() ? id(ha_temp_living).state : id(last_temp_living);
+                      id(refresh_room_ui).execute(val);
+              widgets:
+                - label: {text: "\U000F0502", align: CENTER, text_font: icon_font_small, y: 1}
+
+          # --- RIGHT BUTTON (Kid/Office) ---
+          - button:
+              <<: *room_btn
+              id: btn_kid_bedroom
+              x: 56
+              y: 12
+              on_click:
+                then:
+                  - lambda: |-
+                      if (!id(screen_is_on)) {
+                        return; 
+                      }
+                      id(selected_room) = 3;
+                      auto grey = lv_color_hex(0x444444);
+                      auto blue = lv_color_hex(0x00BFFF);
+                      lv_obj_set_style_border_color(id(btn_kid_bedroom), blue, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_width(id(btn_kid_bedroom), 15, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_color(id(btn_kid_bedroom), blue, LV_PART_MAIN);
+                      lv_obj_set_style_border_color(id(btn_master_bedroom), grey, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_width(id(btn_master_bedroom), 0, LV_PART_MAIN);
+                      lv_obj_set_style_border_color(id(btn_living), grey, LV_PART_MAIN);
+                      lv_obj_set_style_shadow_width(id(btn_living), 0, LV_PART_MAIN);
+                      float val = id(ha_temp_kid).has_state() ? id(ha_temp_kid).state : id(last_temp_kid);
+                      id(refresh_room_ui).execute(val);
+              widgets:
+                - label: {text: "\U000F106E", align: CENTER, text_font: icon_font}
+
+    # MIDDLE: TEMPERATURE DISPLAY
+    - obj:
+        width: 240
+        height: 120
+        align: CENTER
+        y: -5
+        bg_opa: 0
+        border_width: 0
+        pad_all: 0
+        layout:
+          type: flex
+          flex_flow: COLUMN      # Stack Main Temp over the Room/Outside Row
+          flex_align_main: CENTER
+          flex_align_cross: CENTER
+        widgets:
+          # 1. Main Target Temperature
+          - label:
+              id: main_temp_label
+              text: "21.0°"
+              text_font: temp_font
+              text_color: 0xFFFFFF
+
+          # 2. Horizontal Row for Room/Outside/Icon
+          - obj:
+              width: 220
+              height: 40
+              bg_opa: 0
+              border_width: 0
+              layout:
+                type: flex
+                flex_flow: ROW
+                flex_align_main: CENTER
+                flex_align_cross: CENTER
+              widgets:
+                - label:
+                    id: room_temp_label
+                    text: "--.-° / --.-°"
+                    text_font: temp_font_small
+                    recolor: true  # Correct key for LVGL in ESPHome
+                - label:
+                    id: weather_icon_label
+                    text: "" 
+                    text_font: icon_font_weather
+                    recolor: true
+                    pad_left: 5      # Spacing between text and icon
+                    
