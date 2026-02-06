@@ -1,6 +1,16 @@
 substitutions:
   name: m5-dial
   friendly_name: M5 Dial Controller
+  # Weather Icons
+  weather_icon_sun: "\U000F0599"
+  weather_icon_cloud: "\U000F0590"
+  weather_icon_rain: "\U000F0596"
+  weather_icon_snow: "\U000F0598"
+  weather_icon_night: "\U000F0594"
+  # Room Button Icons
+  room_icon_living: "\U000F0502"
+  room_icon_bedroom: "\U000F0FD3"
+  room_icon_kid: "\U000F106E"
 
 esphome:
   name: ${name}
@@ -30,6 +40,7 @@ esphome:
           // 4. Display Initial Temp for Living Room
           char buf[100];
           char outside_color[8];
+
           float o_temp = id(ha_outside_temp).state;
 
           // 5-Stage Color Scale Logic
@@ -246,11 +257,11 @@ font:
   - file: "fonts/materialdesignicons-webfont.ttf"
     id: icon_font
     size: 34
-    glyphs: ["\U000F0FD3", "\U000F106E", "\U000F0209", "\U000F04B2", "\U000F01B4"]
+    glyphs: ["${room_icon_bedroom}", "${room_icon_kid}"]
   - file: "fonts/materialdesignicons-webfont.ttf"
     id: icon_font_small
     size: 28
-    glyphs: ["\U000F0502", "\U000F0238", "\U000F0717"]
+    glyphs: ["${room_icon_living}", "${weather_icon_sun}", "${weather_icon_cloud}", "${weather_icon_rain}", "${weather_icon_snow}"]
 
 script:
   - id: refresh_room_ui
@@ -343,7 +354,7 @@ lvgl:
                       float val = id(ha_temp_bedroom).has_state() ? id(ha_temp_bedroom).state : id(last_temp_bedroom);
                       id(refresh_room_ui).execute(val);
               widgets:
-                - label: {text: "\U000F0FD3", align: CENTER, text_font: icon_font}
+                - label: {text: "${room_icon_bedroom}", align: CENTER, text_font: icon_font}
 
           # --- LEFT BUTTON (Living) ---
           - button:
@@ -370,7 +381,7 @@ lvgl:
                       float val = id(ha_temp_living).has_state() ? id(ha_temp_living).state : id(last_temp_living);
                       id(refresh_room_ui).execute(val);
               widgets:
-                - label: {text: "\U000F0502", align: CENTER, text_font: icon_font_small, y: 1}
+                - label: {text: "${room_icon_living}", align: CENTER, text_font: icon_font_small, y: 1}
 
           # --- RIGHT BUTTON (Kid/Office) ---
           - button:
@@ -397,7 +408,7 @@ lvgl:
                       float val = id(ha_temp_kid).has_state() ? id(ha_temp_kid).state : id(last_temp_kid);
                       id(refresh_room_ui).execute(val);
               widgets:
-                - label: {text: "\U000F106E", align: CENTER, text_font: icon_font}
+                - label: {text: "${room_icon_kid}", align: CENTER, text_font: icon_font}
 
     - obj:
         width: 240
