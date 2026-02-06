@@ -21,8 +21,7 @@ esphome:
       - script.execute: screen_timeout_timer
       - lambda: |-
           // 1. Set the Source of Truth
-          id(selected_room) = 1;
-
+          id(selected_room) = id(ROOM_LIVING);
           auto grey = lv_color_hex(0x444444);
           auto blue = lv_color_hex(0x00BFFF);
           
@@ -65,6 +64,23 @@ esphome:
             temp = id(last_temp_living);
           }
 
+          // Get weather icon
+          char weather_icon[8] = "${weather_icon_sun}"; // Default to sun
+          if (id(ha_weather_condition).has_state()) {
+            std::string condition = id(ha_weather_condition).state;
+            if (condition.find("rain") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_rain}");
+            } else if (condition.find("cloud") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_cloud}");
+            } else if (condition.find("snow") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_snow}");
+            } else if (condition.find("night") != std::string::npos || condition.find("clear-night") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_night}");
+            } else if (condition.find("clear") != std::string::npos || condition.find("sunny") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_sun}");
+            }
+          }
+
           if (id(ha_outside_temp).has_state()) {
             if (temp > 0.1) {
               sprintf(buf, "#FFFFFF %.1f°# #666666 /# #%s %.1f°#", temp, outside_color, o_temp);
@@ -79,6 +95,7 @@ esphome:
             }
           }
           lv_label_set_text(id(room_temp_label), buf);
+          lv_label_set_text(id(weather_icon_label), weather_icon);
           ESP_LOGD("main", "UI Initialized: Living Room (ID: 1) selected");
 
 esp32:
@@ -135,6 +152,15 @@ rtttl:
 
 # --- STATE STORAGE ---
 globals:
+  - id: ROOM_LIVING
+    type: int
+    initial_value: '1'
+  - id: ROOM_BEDROOM
+    type: int
+    initial_value: '2'
+  - id: ROOM_KID
+    type: int
+    initial_value: '3'
   - id: target_temp
     type: float
     initial_value: '21.0'
@@ -163,7 +189,7 @@ sensor:
       then:
         - lambda: |-
             id(last_temp_bedroom) = x;
-            if (id(selected_room) == 2) id(refresh_room_ui).execute(x);
+            if (id(selected_room) == id(ROOM_BEDROOM)) id(refresh_room_ui).execute(x);
 
   - platform: homeassistant
     id: ha_temp_living
@@ -173,7 +199,7 @@ sensor:
       then:
         - lambda: |-
             id(last_temp_living) = x;
-            if (id(selected_room) == 1) id(refresh_room_ui).execute(x);
+            if (id(selected_room) == id(ROOM_LIVING)) id(refresh_room_ui).execute(x);
 
   - platform: homeassistant
     id: ha_temp_kid
@@ -183,7 +209,7 @@ sensor:
       then:
         - lambda: |-
             id(last_temp_kid) = x;
-            if (id(selected_room) == 3) id(refresh_room_ui).execute(x);
+            if (id(selected_room) == id(ROOM_KID)) id(refresh_room_ui).execute(x);
 
   - platform: homeassistant
     id: ha_outside_temp
@@ -192,7 +218,7 @@ sensor:
     internal: true
     on_value:
       then:
-        - lambda: 'id(refresh_room_ui).execute(id(selected_room) == 1 ? id(last_temp_living) : (id(selected_room) == 2 ? id(last_temp_bedroom) : id(last_temp_kid)));'
+        - lambda: 'id(refresh_room_ui).execute(id(selected_room) == id(ROOM_LIVING) ? id(last_temp_living) : (id(selected_room) == id(ROOM_BEDROOM) ? id(last_temp_bedroom) : id(last_temp_kid)));'
 
   - platform: rotary_encoder
     id: dial_encoder
@@ -211,6 +237,11 @@ text_sensor:
     id: ha_weather_condition
     entity_id: weather.forecast_home
     internal: true
+    on_value:
+      then:
+        - lambda: |-
+            // Refresh the UI so weather icon updates immediately
+            id(refresh_room_ui).execute(id(selected_room) == id(ROOM_LIVING) ? id(last_temp_living) : (id(selected_room) == id(ROOM_BEDROOM) ? id(last_temp_bedroom) : id(last_temp_kid)));
 
 # --- NATIVE DISPLAY DRIVER ---
 display:
@@ -261,7 +292,7 @@ font:
   - file: "fonts/materialdesignicons-webfont.ttf"
     id: icon_font_small
     size: 28
-    glyphs: ["${room_icon_living}", "${weather_icon_sun}", "${weather_icon_cloud}", "${weather_icon_rain}", "${weather_icon_snow}"]
+    glyphs: ["${room_icon_living}", "${weather_icon_sun}", "${weather_icon_cloud}", "${weather_icon_rain}", "${weather_icon_snow}", "${weather_icon_night}"]
 
 script:
   - id: refresh_room_ui
@@ -271,7 +302,24 @@ script:
       - lambda: |-
           char buf[100];
           char outside_color[8];
+          char weather_icon[8] = "${weather_icon_sun}"; // Default to sun
           float o_temp = id(ha_outside_temp).state;
+
+          // Get weather icon
+          if (id(ha_weather_condition).has_state()) {
+            std::string condition = id(ha_weather_condition).state;
+            if (condition.find("rain") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_rain}");
+            } else if (condition.find("cloud") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_cloud}");
+            } else if (condition.find("snow") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_snow}");
+            } else if (condition.find("night") != std::string::npos || condition.find("clear-night") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_night}");
+            } else if (condition.find("clear") != std::string::npos || condition.find("sunny") != std::string::npos) {
+              strcpy(weather_icon, "${weather_icon_sun}");
+            }
+          }
 
           // 5-Stage Color Scale Logic
           if (!id(ha_outside_temp).has_state()) {
@@ -297,6 +345,7 @@ script:
           }
 
           lv_label_set_text(id(room_temp_label), buf);
+          lv_label_set_text(id(weather_icon_label), weather_icon);
   - id: screen_timeout_timer
     mode: restart # Crucial: Restarting the script resets the 30s timer
     then:
@@ -341,7 +390,7 @@ lvgl:
                       if (!id(screen_is_on)) {
                         return; 
                       }
-                      id(selected_room) = 2;
+                      id(selected_room) = id(ROOM_BEDROOM);
                       auto grey = lv_color_hex(0x444444);
                       auto blue = lv_color_hex(0x00BFFF);
                       lv_obj_set_style_border_color(id(btn_master_bedroom), blue, LV_PART_MAIN);
@@ -368,7 +417,7 @@ lvgl:
                       if (!id(screen_is_on)) {
                         return; 
                       }
-                      id(selected_room) = 1;
+                      id(selected_room) = id(ROOM_LIVING);
                       auto grey = lv_color_hex(0x444444);
                       auto blue = lv_color_hex(0x00BFFF);
                       lv_obj_set_style_border_color(id(btn_living), blue, LV_PART_MAIN);
@@ -395,7 +444,7 @@ lvgl:
                       if (!id(screen_is_on)) {
                         return; 
                       }
-                      id(selected_room) = 3;
+                      id(selected_room) = id(ROOM_KID);
                       auto grey = lv_color_hex(0x444444);
                       auto blue = lv_color_hex(0x00BFFF);
                       lv_obj_set_style_border_color(id(btn_kid_bedroom), blue, LV_PART_MAIN);
@@ -434,13 +483,33 @@ lvgl:
               text_color: 0xFFFFFF
               text_align: CENTER
 
-          # 2. Horizontal Row for Room/Outside/Icon
-          - label:
-              id: room_temp_label
+          # 2. Row for Room/Outside Temp and Weather Icon
+          - obj:
               width: 100%
-              y: -10
-              text: "--.-° / --.-°"
-              text_font: temp_font_small
-              recolor: true  # Correct key for LVGL in ESPHome
-              text_align: CENTER
+              height: 35
+              pad_all: 0
+              bg_opa: 0
+              border_width: 0
+              layout:
+                type: flex
+                flex_flow: ROW
+                flex_align_main: CENTER
+                flex_align_cross: CENTER
+              widgets:
+                # Room/Outside Temperature
+                - label:
+                    id: room_temp_label
+                    flex_grow: 1
+                    text: "--.-° / --.-°"
+                    text_font: temp_font_small
+                    recolor: true
+                    text_align: CENTER
+
+                # Weather Icon
+                - label:
+                    id: weather_icon_label
+                    text: "☀️"
+                    text_font: icon_font_small
+                    text_align: CENTER
+                    text_color: 0xFFFFFF
                     
